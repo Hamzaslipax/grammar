@@ -1,0 +1,10 @@
+stages:
+  - verify
+
+check_md_versions:
+  stage: verify
+  image: alpine:3.19
+  before_script:
+    - apk add --no-cache git
+  script:
+    - ./scripts/check_md_versions.sh
