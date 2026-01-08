@@ -1,51 +1,36 @@
 #!/usr/bin/env sh
 set -eu
 
-# Determine the two commits to compare:
-# - In GitLab MR pipelines: CI_MERGE_REQUEST_DIFF_BASE_SHA vs CI_COMMIT_SHA
-# - Otherwise: CI_COMMIT_BEFORE_SHA vs CI_COMMIT_SHA
-# - Local fallback: HEAD~1 vs HEAD
+# Determine commits to compare
 BASE_SHA="${CI_MERGE_REQUEST_DIFF_BASE_SHA:-${CI_COMMIT_BEFORE_SHA:-}}"
 HEAD_SHA="${CI_COMMIT_SHA:-}"
 
 [ -n "$HEAD_SHA" ] || HEAD_SHA="$(git rev-parse HEAD)"
 [ -n "$BASE_SHA" ] || BASE_SHA="$(git rev-parse HEAD~1)"
 
-# Extract the first version token from a file content.
-# Accepts:
-#   Version: V1.3.4
-#   version:V1.3.4
-#   Version:    1.3.4
-extract_version() {
-  awk '
-    match($0,/^[Vv]ersion:[[:space:]]*([^[:space:]]+)/,a) { print a[1]; exit }
-  '
-}
-
-# List changed markdown files between base and head
+# List changed markdown files
 CHANGED_DOCS="$(git diff --name-only "$BASE_SHA" "$HEAD_SHA" -- | grep -E '\.md$' || true)"
 [ -z "$CHANGED_DOCS" ] && exit 0
 
 for doc in $CHANGED_DOCS; do
-  # If file was deleted in HEAD, skip it
+  # Skip deleted files
   [ -f "$doc" ] || continue
 
-  # Check if file existed in BASE (git cat-file is faster/cleaner than git show for existence test)
+  # If file did not exist before, it must have a version
   if ! git cat-file -e "$BASE_SHA:$doc" 2>/dev/null; then
-    # New file -> must have Version:
-    NEW_VER="$(extract_version < "$doc" || true)"
+    NEW_VER="$(grep -m1 '^version:' "$doc" | sed 's/^version:[[:space:]]*//' || true)"
     if [ -z "$NEW_VER" ]; then
-      echo "ERROR: Missing Version field in new file: $doc"
+      echo "ERROR: Missing version field in new file: $doc"
       exit 1
     fi
     continue
   fi
 
-  OLD_VER="$(git show "$BASE_SHA:$doc" | extract_version || true)"
-  NEW_VER="$(extract_version < "$doc" || true)"
+  OLD_VER="$(git show "$BASE_SHA:$doc" | grep -m1 '^version:' | sed 's/^version:[[:space:]]*//' || true)"
+  NEW_VER="$(grep -m1 '^version:' "$doc" | sed 's/^version:[[:space:]]*//' || true)"
 
   if [ -z "$OLD_VER" ] || [ -z "$NEW_VER" ]; then
-    echo "ERROR: Missing Version field in: $doc"
+    echo "ERROR: Missing version field in: $doc"
     exit 1
   fi
 
@@ -54,3 +39,4 @@ for doc in $CHANGED_DOCS; do
     exit 1
   fi
 done
+
